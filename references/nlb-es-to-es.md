@@ -16,7 +16,7 @@ ES_1 (VPC_1) → [Endpoint] ←PrivateLink→ [Endpoint Service] → NLB → ES_
 
 ## Step 1: Create NLB Instance
 
-1. Open [NLB Console](https://slb.console.aliyun.com/nlb)
+1. Open [NLB Console](https://slb.console.aliyun.com/nlb) (select your region in the top nav)
 2. Click **Create NLB**
 3. Configure:
    - **Region**: same as ES_2
@@ -31,13 +31,17 @@ ES_1 (VPC_1) → [Endpoint] ←PrivateLink→ [Endpoint Service] → NLB → ES_
 1. Go to NLB **Server Groups** page
 2. Click **Create Server Group**
 3. Configure:
-   - **Type**: **IP Type** (IP 类型)
+   - **Type**: **IP Type** (IP 类型) — this is critical, do NOT use Instance type
    - **VPC**: select ES_2's VPC
    - Custom name
 
 ## Step 3: Add ES_2 as Backend
 
-1. Get ES_2 private IP: `ping <ES_2_private_domain>`
+1. Get ES_2 private IP using one of these methods:
+   - **From ES Console**: check the instance's **Basic Information** page for private network address
+   - **Via ping**: `ping <ES_2_private_domain>` (works if DNS resolves from your environment)
+   - **Via nslookup**: `nslookup <ES_2_private_domain>` (more reliable across environments)
+   - **Via API**: `aliyun elasticsearch DescribeInstance --InstanceId <id>` and check `networkConfig`
 2. In the server group, click **Edit Backend Servers**
 3. Click **Add IP**
 4. Enter ES_2's private IP
@@ -54,7 +58,7 @@ ES_1 (VPC_1) → [Endpoint] ←PrivateLink→ [Endpoint Service] → NLB → ES_
 
 ## Step 5: Create Endpoint Service
 
-1. Open [PrivateLink Endpoint Service Console](https://vpc.console.aliyun.com/privatelink/cn-hangzhou/epsrv)
+1. Open [PrivateLink Endpoint Service Console](https://vpc.console.aliyun.com/privatelink/) (select your region)
 2. Click **Create Endpoint Service**
 3. Configure:
    - **Region**: same as ES
@@ -93,6 +97,8 @@ Save and wait for the cluster to restart.
 
 ### Run reindex
 
+Use `http://` or `https://` matching ES_2's protocol configuration:
+
 ```json
 POST _reindex
 {
@@ -110,6 +116,8 @@ POST _reindex
 }
 ```
 
+> If ES_2 has HTTPS enabled, use `"host": "https://<endpoint_domain>:9200"` instead.
+
 ### Verify
 
 ```json
@@ -117,3 +125,30 @@ GET dest_index/_count
 ```
 
 Compare document count with ES_2's source index.
+
+### Large index migration tips
+
+For large indices, use sliced scroll for parallelism:
+
+```json
+POST _reindex?slices=5&wait_for_completion=false
+{
+  "source": {
+    "remote": {
+      "host": "http://<endpoint_domain>:9200",
+      "username": "elastic",
+      "password": "<ES_2_password>"
+    },
+    "index": "source_index"
+  },
+  "dest": {
+    "index": "dest_index"
+  }
+}
+```
+
+Monitor progress with:
+
+```json
+GET _tasks?detailed=true&actions=*reindex
+```

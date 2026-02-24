@@ -17,11 +17,12 @@ ES (VPC_1) → [Endpoint] ←PrivateLink→ [Endpoint Service] → CLB → ECS (
 
 ## Step 1: Create and Configure CLB Instance
 
-1. Open [CLB Console](https://slb.console.aliyun.com/slb/cn-hangzhou/slbs)
+1. Open [CLB Console](https://slb.console.aliyun.com/slb/) (select your region in the top nav)
 2. Click **Create CLB** (传统型负载均衡)
 3. Configure:
    - **Region**: same as ES instance
    - **Instance Type**: **Private** (私网)
+   - **Availability Zone**: same as ES and ECS
 4. Purchase the CLB instance
 5. Configure listener:
    - Click **Listener Configuration Wizard** on the instance
@@ -33,11 +34,10 @@ ES (VPC_1) → [Endpoint] ←PrivateLink→ [Endpoint Service] → CLB → ECS (
 
 ## Step 2: Create Endpoint Service
 
-1. Open [PrivateLink Endpoint Service Console](https://vpc.console.aliyun.com/privatelink/cn-hangzhou/epsrv)
-2. Select **same region** as the CLB
-3. Click **Create Endpoint Service**
-4. Select the CLB instance as the service resource
-5. Configure other parameters and click **Confirm**
+1. Open [PrivateLink Endpoint Service Console](https://vpc.console.aliyun.com/privatelink/) (select your region)
+2. Click **Create Endpoint Service**
+3. Select the CLB instance as the service resource
+4. Configure other parameters and click **Confirm**
 
 > Reference: [Create Endpoint Service](https://help.aliyun.com/zh/privatelink/user-guide/create-and-manage-an-endpoint-service)
 
@@ -53,18 +53,16 @@ ES (VPC_1) → [Endpoint] ←PrivateLink→ [Endpoint Service] → CLB → ECS (
 8. Click **Allow Connection** on the endpoint row
 9. Wait for **Connection Status** to become **Connected** (已连接)
 
-## Step 4: Get Endpoint Domain (optional)
+## Step 4: Get Endpoint Domain
 
 1. In the private connection panel, click the **Endpoint ID**
 2. Expand the endpoint to view its domain name
-3. Use this domain in:
-   - Watcher actions (`host` field)
-   - LDAP/AD config (`url` field)
-   - Reindex whitelist (`reindex.remote.whitelist`)
+3. Use this domain in your service configuration (see use cases below)
 
 ## Use Cases After Connection
 
-### Watcher
+### Watcher Webhook
+
 ```json
 {
   "actions": {
@@ -81,13 +79,42 @@ ES (VPC_1) → [Endpoint] ←PrivateLink→ [Endpoint Service] → CLB → ECS (
 ```
 
 ### LDAP Configuration
+
 ```yaml
 xpack.security.authc.realms.ldap.ldap1:
+  order: 2
   url: "ldap://<endpoint_domain>:389"
+  bind_dn: "cn=admin,dc=example,dc=com"
+  user_search:
+    base_dn: "ou=users,dc=example,dc=com"
+    filter: "(uid={0})"
+  group_search:
+    base_dn: "ou=groups,dc=example,dc=com"
+  unmapped_groups_as_roles: false
 ```
 
+### AD (Active Directory) Configuration
+
+```yaml
+xpack.security.authc.realms.active_directory.ad1:
+  order: 3
+  url: "ldaps://<endpoint_domain>:636"
+  domain_name: "example.com"
+  unmapped_groups_as_roles: false
+```
+
+> Note: For AD over LDAPS (port 636), ensure the CLB listener is configured on port 636
+> and the AD server's SSL certificate is valid.
+
 ### Reindex from Self-managed ES
-First add whitelist in ES YML: `reindex.remote.whitelist: ["<endpoint_domain>:9200"]`
+
+First add whitelist in ES YML config (requires cluster restart):
+
+```
+reindex.remote.whitelist: ["<endpoint_domain>:9200"]
+```
+
+Then run:
 
 ```json
 POST _reindex
@@ -105,3 +132,5 @@ POST _reindex
   }
 }
 ```
+
+> Use `https://` if the self-managed ES on ECS has TLS enabled.
